@@ -3,8 +3,12 @@ const express = require("express");
 const session = require("express-session");
 const bodyParser = require("body-parser");
 const path = require("path");
+const http = require("http");
+const socketIo = require("socket.io");
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server);
 const port = 3001;
 
 app.set("view engine", "ejs");
@@ -17,7 +21,7 @@ const sessionSecret =
   process.env.SESSION_SECRET || "dev-secret-not-for-production-please-change";
 if (!process.env.SESSION_SECRET) {
   console.warn(
-    "WARNING: SESSION_SECRET not set in .env — using a development fallback. Do NOT use this in production."
+    "WARNING: SESSION_SECRET not set in .env — using a development fallback. Do NOT use this in production.",
   );
 }
 
@@ -27,12 +31,23 @@ app.use(
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false }, // Set to true if using HTTPS
-  })
+  }),
 );
 
 const routes = require("./routes");
 app.use("/", routes);
 
-app.listen(port, () => {
+server.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
 });
+
+// Socket.io connection
+io.on("connection", (socket) => {
+  console.log("A user connected");
+  socket.on("disconnect", () => {
+    console.log("User disconnected");
+  });
+});
+
+// Make io available in routes
+app.set("io", io);

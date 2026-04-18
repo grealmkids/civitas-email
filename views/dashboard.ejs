@@ -9,6 +9,7 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
     <a href="/logout" class="logout-button-icon"
@@ -83,6 +84,8 @@
       </form>
     </div>
     <script>
+      const socket = io();
+
       // Attachment UI feedback
       (function () {
         const attachmentInput = document.getElementById("attachment");
@@ -204,20 +207,40 @@
         });
 
         if (result.isConfirmed) {
-          showProgress();
+          showProgress(contactCount);
           form.submit();
         }
 
         return false;
       }
 
-      function showProgress() {
+      function showProgress(total) {
+        let sent = 0;
         Swal.fire({
           title: "Sending Emails...",
-          text: "Please wait.",
+          html: `
+            <div style="text-align: center; margin: 20px 0;">
+              <div style="font-size: 1.2rem; margin-bottom: 10px;">Sent: <span id="sent-count">0</span> / ${total}</div>
+              <div style="width: 100%; background-color: #f0f0f0; border-radius: 10px; height: 20px; overflow: hidden;">
+                <div id="progress-bar" style="width: 0%; height: 100%; background-color: #007aff; transition: width 0.3s ease;"></div>
+              </div>
+            </div>
+          `,
           allowOutsideClick: false,
+          showConfirmButton: false,
           didOpen: () => {
-            Swal.showLoading();
+            socket.on("progress", (data) => {
+              sent = data.sent;
+              const percentage = (sent / total) * 100;
+              document.getElementById("sent-count").textContent = sent;
+              document.getElementById("progress-bar").style.width =
+                `${percentage}%`;
+              if (sent >= total) {
+                setTimeout(() => {
+                  Swal.close();
+                }, 1000);
+              }
+            });
           },
         });
       }

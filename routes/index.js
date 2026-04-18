@@ -131,6 +131,7 @@ router.post("/send", isAuthenticated, (req, res) => {
       return res.redirect("/dashboard?status=error");
     }
 
+    const io = req.app.get("io");
     const { message, emailType, subject } = req.body;
     const results = [];
 
@@ -264,6 +265,10 @@ router.post("/send", isAuthenticated, (req, res) => {
           try {
             await transporter.sendMail(mailOptions);
             successfulEmails++;
+            io.emit("progress", {
+              sent: successfulEmails + failedEmails,
+              total: totalEmails,
+            });
             successfulRecipients.push({
               name: name,
               email: recipientEmail,
@@ -271,6 +276,10 @@ router.post("/send", isAuthenticated, (req, res) => {
           } catch (error) {
             console.error(`Failed to send email to ${recipientEmail}:`, error);
             failedEmails++;
+            io.emit("progress", {
+              sent: successfulEmails + failedEmails,
+              total: totalEmails,
+            });
           }
 
           if (i < parsedRecipients.length - 1) await sleep(emailDelayMs);
