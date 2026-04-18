@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mtoto W'Afrika Child Care Ministries - Email Sender</title>
+    <title>Civitas Construction - Email Sender</title>
     <link rel="stylesheet" href="/css/style.css" />
     <link
       rel="stylesheet"
@@ -22,7 +22,7 @@
         action="/send"
         method="POST"
         enctype="multipart/form-data"
-        onsubmit="showProgress()">
+        onsubmit="return confirmSend(event);">
         <div class="dashboard-grid">
           <div class="left-column">
             <div class="input-group">
@@ -113,6 +113,103 @@
           });
         }
       })();
+
+      async function countCsvContacts(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const text = reader.result;
+            const lines = text
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0);
+
+            let contactCount = lines.length;
+            if (contactCount === 0) {
+              return resolve(0);
+            }
+
+            const header = lines[0].toLowerCase();
+            if (
+              /^(name|email|partner|schoolname)(\s*[;,\t])/i.test(lines[0]) ||
+              header.includes("email") ||
+              header.includes("name")
+            ) {
+              contactCount = Math.max(0, contactCount - 1);
+            }
+
+            resolve(contactCount);
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsText(file);
+        });
+      }
+
+      async function confirmSend(event) {
+        event.preventDefault();
+        const form = event.target;
+        const csvInput = document.getElementById("csvfile");
+        const attachmentInput = document.getElementById("attachment");
+        const csvFile = csvInput.files && csvInput.files[0];
+        const attachmentFile =
+          attachmentInput.files && attachmentInput.files[0];
+
+        if (!csvFile) {
+          Swal.fire({
+            title: "CSV required",
+            text: "Please attach a CSV file before sending.",
+            icon: "warning",
+          });
+          return false;
+        }
+
+        let contactCount = 0;
+        try {
+          contactCount = await countCsvContacts(csvFile);
+        } catch (error) {
+          Swal.fire({
+            title: "CSV read error",
+            text: "Could not read the CSV file. Please try again.",
+            icon: "error",
+          });
+          return false;
+        }
+
+        const attachmentLabel = attachmentFile
+          ? `<p style="margin:0; font-size:0.88rem; color:#444">Attachment:</p>
+             <p style="margin:4px 0 0 0; font-size:1rem; color:#16a34a">${attachmentFile.name}</p>`
+          : `<p style="margin:0; font-size:0.88rem; color:#444">Attachment:</p>
+             <p style="margin:4px 0 0 0; font-size:1rem; color:#d93025">No Attachment</p>`;
+
+        const html = `
+          <div style="text-align:left; line-height:1.5">
+            <p style="margin:0; font-size:0.88rem; color:#444">Total contacts:</p>
+            <p style="margin:4px 0 12px 0; font-size:1.9rem; font-weight:700; color:#16a34a">${contactCount}</p>
+            ${attachmentLabel}
+            <p style="margin-top:16px; color:#555">Proceed?</p>
+          </div>
+        `;
+
+        const result = await Swal.fire({
+          title: "Ready to send?",
+          html,
+          icon: "question",
+          showCancelButton: true,
+          confirmButtonText: "Proceed",
+          cancelButtonText: "Cancel",
+          focusCancel: true,
+          customClass: {
+            popup: "swal2-border-radius",
+          },
+        });
+
+        if (result.isConfirmed) {
+          showProgress();
+          form.submit();
+        }
+
+        return false;
+      }
 
       function showProgress() {
         Swal.fire({

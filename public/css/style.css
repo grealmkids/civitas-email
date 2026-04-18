@@ -1,5 +1,15 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@700;800&display=swap");
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family:
+    "Poppins",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
   background-color: #f4f7f6;
   margin: 0;
   display: flex;
@@ -14,17 +24,28 @@ body {
   padding: 20px;
 }
 
-.login-box, .dashboard-box {
+.login-box,
+.dashboard-box {
   background-color: #ffffff;
   padding: 40px;
   border-radius: 8px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
 h1 {
   text-align: center;
   color: #333;
   margin-bottom: 30px;
+}
+
+.civitas {
+  font-family: "Poppins", sans-serif;
+  font-weight: 800;
+  font-size: 4rem;
+  letter-spacing: 0.25rem;
+  color: #0f4c81;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
 }
 
 .input-group {
@@ -37,12 +58,28 @@ h1 {
   color: #555;
 }
 
-.input-group input, .input-group textarea {
+.input-group input,
+.input-group textarea {
   width: 100%;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 14px 16px;
+  border: 2px solid #cbd5e1;
+  border-radius: 12px;
   box-sizing: border-box;
+  background-color: #fcfdff;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+  font-size: 1rem;
+  color: #1f2937;
+}
+
+.input-group input:focus,
+.input-group textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+  transform: translateY(-1px);
 }
 
 button {
@@ -93,7 +130,10 @@ button:hover {
   display: flex;
   gap: 20px;
 }
-
+.pwd {
+  background-color: #c3f0ff !important;
+  border: 2px solid #0e3a7b !important;
+}
 .logo {
   display: block;
   margin: 0 auto 20px;
@@ -116,8 +156,6 @@ button:hover {
   grid-template-columns: 1fr 1.5fr;
   gap: 40px;
 }
-
-
 
 @media (max-width: 992px) {
   .dashboard-grid {

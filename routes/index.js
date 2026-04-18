@@ -100,7 +100,7 @@ async function sendAnalyticsReport(
   });
 
   const mailOptions = {
-    from: `"Mtoto W'Afrika Child Care Ministries Analytics" <${process.env.EMAIL_USER}>`,
+    from: `"Civitas Construction Analytics" <${process.env.EMAIL_USER}>`,
     to: analyticsEmails.join(", "),
     subject: `Email Campaign Analytics Report: ${subject}`,
     html: html,
@@ -140,7 +140,12 @@ router.post("/send", isAuthenticated, (req, res) => {
       req.files && req.files["attachment"] && req.files["attachment"][0];
 
     fs.createReadStream(csvFile.path)
-      .pipe(csv({ headers: ["name", "email"] }))
+      .pipe(
+        csv({
+          headers: ["name", "email"],
+          mapValues: ({ value }) => (value || "").trim(),
+        }),
+      )
       .on("data", (data) => results.push(data))
       .on("end", async () => {
         const smtpPort = Number(process.env.SMTP_PORT) || 465;
@@ -163,52 +168,65 @@ router.post("/send", isAuthenticated, (req, res) => {
         const emailDelayMs = Number(process.env.EMAIL_SEND_DELAY_MS) || 2000;
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+        const parsedRecipients = results
+          .map((row) => ({
+            name: (
+              row.name ||
+              row.Name ||
+              row.partner ||
+              row.schoolname ||
+              ""
+            ).trim(),
+            email: (row.email || row.Email || "").trim(),
+            raw: row,
+          }))
+          .filter((recipient) => {
+            const email = recipient.email.toLowerCase();
+            return (
+              email &&
+              email.indexOf("@") !== -1 &&
+              email !== "email" &&
+              email !== "name"
+            );
+          });
+
+        if (parsedRecipients.length === 0) {
+          console.warn(
+            "No valid recipient rows were found in the uploaded CSV.",
+            results,
+          );
+          return res.redirect("/dashboard?status=error");
+        }
+
         let successfulEmails = 0;
         let failedEmails = 0;
-        const totalEmails = results.length;
+        const totalEmails = parsedRecipients.length;
         const successfulRecipients = [];
 
-        for (let i = 0; i < results.length; i++) {
-          const row = results[i];
-          // Normalize possible header names: prefer 'partner', fallback to 'schoolname' or 'name'
-          const name = (row.name || row.partner || row.schoolname || "").trim();
-          const recipientEmail = (row.email || row.Email || "").trim();
-
-          // Skip rows without a valid-looking email (also skips header-row if it was parsed as data)
-          if (
-            !recipientEmail ||
-            recipientEmail.toLowerCase() === "email" ||
-            recipientEmail.indexOf("@") === -1
-          ) {
-            console.warn("Skipping invalid recipient row:", row);
-            failedEmails++;
-            if (i < results.length - 1) await sleep(emailDelayMs);
-            continue;
-          }
+        for (let i = 0; i < parsedRecipients.length; i++) {
+          const recipient = parsedRecipients[i];
+          const name = recipient.name;
+          const recipientEmail = recipient.email;
 
           const mailOptions = {
-            from: `"Mtoto W'Afrika Child Care Ministries" <${process.env.EMAIL_USER}>`,
+            from: `"Civitas Construction" <${process.env.EMAIL_USER}>`,
             to: recipientEmail,
             subject: subject,
           };
 
-          // Support multiple placeholder styles: [Name], [School Name], [Partner], {{name}}, {{Name}}, [[Name]]
           let personalizedMessage = message || "";
           const placeholderValue = name || recipientEmail;
 
-          // Common bracketed placeholders
           personalizedMessage = personalizedMessage
             .replace(/\[Name\]/gi, placeholderValue)
             .replace(/\[Partner\]/gi, placeholderValue)
             .replace(/\[name\]/gi, placeholderValue);
 
-          // Mustache-style {{name}} or {{Name}}
           personalizedMessage = personalizedMessage.replace(
             /{{\s*name\s*}}/gi,
             placeholderValue,
           );
 
-          // Double-bracket style [[Name]]
           personalizedMessage = personalizedMessage.replace(
             /\[\[\s*name\s*\]\]/gi,
             placeholderValue,
@@ -220,7 +238,6 @@ router.post("/send", isAuthenticated, (req, res) => {
             mailOptions.text = personalizedMessage;
           }
 
-          // If an attachment was uploaded, attach it to each outgoing email
           if (attachmentFile) {
             mailOptions.attachments = [
               {
@@ -242,7 +259,7 @@ router.post("/send", isAuthenticated, (req, res) => {
             failedEmails++;
           }
 
-          if (i < results.length - 1) await sleep(emailDelayMs);
+          if (i < parsedRecipients.length - 1) await sleep(emailDelayMs);
         }
 
         if (typeof transporter.close === "function") {
