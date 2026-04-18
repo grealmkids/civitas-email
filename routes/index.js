@@ -142,7 +142,7 @@ router.post("/send", isAuthenticated, (req, res) => {
     fs.createReadStream(csvFile.path)
       .pipe(
         csv({
-          headers: ["name", "email"],
+          headers: ["name", "email", "company"],
           mapValues: ({ value }) => (value || "").trim(),
         }),
       )
@@ -178,6 +178,7 @@ router.post("/send", isAuthenticated, (req, res) => {
               ""
             ).trim(),
             email: (row.email || row.Email || "").trim(),
+            company: (row.company || row.Company || "").trim(),
             raw: row,
           }))
           .filter((recipient) => {
@@ -207,6 +208,7 @@ router.post("/send", isAuthenticated, (req, res) => {
           const recipient = parsedRecipients[i];
           const name = recipient.name;
           const recipientEmail = recipient.email;
+          const company = recipient.company;
 
           const mailOptions = {
             from: `"Civitas Construction" <${process.env.EMAIL_USER}>`,
@@ -216,11 +218,13 @@ router.post("/send", isAuthenticated, (req, res) => {
 
           let personalizedMessage = message || "";
           const placeholderValue = name || recipientEmail;
+          const placeholderCompany = company || "";
 
           personalizedMessage = personalizedMessage
             .replace(/\[Name\]/gi, placeholderValue)
             .replace(/\[Partner\]/gi, placeholderValue)
-            .replace(/\[name\]/gi, placeholderValue);
+            .replace(/\[name\]/gi, placeholderValue)
+            .replace(/\[company\]/gi, placeholderCompany);
 
           personalizedMessage = personalizedMessage.replace(
             /{{\s*name\s*}}/gi,
@@ -230,6 +234,16 @@ router.post("/send", isAuthenticated, (req, res) => {
           personalizedMessage = personalizedMessage.replace(
             /\[\[\s*name\s*\]\]/gi,
             placeholderValue,
+          );
+
+          personalizedMessage = personalizedMessage.replace(
+            /{{\s*company\s*}}/gi,
+            placeholderCompany,
+          );
+
+          personalizedMessage = personalizedMessage.replace(
+            /\[\[\s*company\s*\]\]/gi,
+            placeholderCompany,
           );
 
           if (emailType === "html") {
