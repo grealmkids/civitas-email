@@ -1,0 +1,310 @@
+const express = require("express");
+const router = express.Router();
+const multer = require("multer");
+const csv = require("csv-parser");
+const nodemailer = require("nodemailer");
+const fs = require("fs");
+const path = require("path"); // Added
+const ejs = require("ejs"); // Added
+const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+
+// Limit uploads to 25 MB per file
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+// Middleware to check if the user is authenticated
+function isAuthenticated(req, res, next) {
+  if (req.session.user) {
+    next();
+  } else {
+    res.redirect("/");
+  }
+}
+
+router.get("/", (req, res) => {
+  if (req.session.user) {
+    res.redirect("/dashboard");
+  } else {
+    res.render("login", { error: null });
+  }
+});
+
+router.post("/login", (req, res) => {
+  const { password } = req.body;
+  if (password === process.env.APP_PASSWORD) {
+    req.session.user = { loggedIn: true };
+    res.redirect("/dashboard");
+  } else {
+    res.render("login", { error: "Incorrect password" });
+  }
+});
+
+router.get("/dashboard", isAuthenticated, (req, res) => {
+  const { status } = req.query;
+  res.render("dashboard", { status: status });
+});
+
+// Function to get analytics emails from .env
+function getAnalyticsEmails() {
+  const emails = [];
+  for (let i = 1; i <= 4; i++) {
+    // Assuming up to ANALYTICS_EMAIL_4
+    const email = process.env[`ANALYTICS_EMAIL_${i}`];
+    if (email) {
+      emails.push(email);
+    }
+  }
+  return emails;
+}
+
+// Function to send analytics report email
+async function sendAnalyticsReport(
+  stats,
+  originalMessage,
+  emailType,
+  subject,
+  successfulRecipients,
+) {
+  const analyticsEmails = getAnalyticsEmails();
+
+  if (analyticsEmails.length === 0) {
+    console.log("No analytics emails configured. Skipping report.");
+    return;
+  }
+
+  const smtpPort = Number(process.env.SMTP_PORT) || 465;
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: smtpPort,
+    secure: smtpPort === 465, // true for 465, false for other ports (587 etc.)
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+
+  const templatePath = path.join(__dirname, "../views/analytics_email.ejs");
+  const html = await ejs.renderFile(templatePath, {
+    totalEmails: stats.total,
+    successfulEmails: stats.successful,
+    failedEmails: stats.failed,
+    subject: subject,
+    emailType: emailType,
+    originalMessage: originalMessage,
+    successfulRecipients: successfulRecipients,
+  });
+
+  const mailOptions = {
+    from: `"Mtoto W'Afrika Child Care Ministries Analytics" <${process.env.EMAIL_USER}>`,
+    to: analyticsEmails.join(", "),
+    subject: `Email Campaign Analytics Report: ${subject}`,
+    html: html,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log("Analytics report sent successfully.");
+  } catch (error) {
+    console.error("Error sending analytics report:", error);
+  }
+}
+
+router.post("/send", isAuthenticated, (req, res) => {
+  // Run multer fields middleware manually to catch file-size / multer errors
+  const fieldsMiddleware = upload.fields([
+    { name: "csvfile", maxCount: 1 },
+    { name: "attachment", maxCount: 1 },
+  ]);
+
+  fieldsMiddleware(req, res, async function (err) {
+    if (err) {
+      if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+        console.warn("Upload rejected: file too large.", err);
+        return res.redirect("/dashboard?status=error");
+      }
+      console.error("Upload error:", err);
+      return res.redirect("/dashboard?status=error");
+    }
+
+    const { message, emailType, subject } = req.body;
+    const results = [];
+
+    const csvFile =
+      req.files && req.files["csvfile"] && req.files["csvfile"][0];
+    const attachmentFile =
+      req.files && req.files["attachment"] && req.files["attachment"][0];
+
+    fs.createReadStream(csvFile.path)
+      .pipe(csv({ headers: ["name", "email"] }))
+      .on("data", (data) => results.push(data))
+      .on("end", async () => {
+        const smtpPort = Number(process.env.SMTP_PORT) || 465;
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+          tls: {
+            rejectUnauthorized: false,
+          },
+          pool: true,
+          maxConnections: 1,
+          maxMessages: 100,
+        });
+
+        const emailDelayMs = Number(process.env.EMAIL_SEND_DELAY_MS) || 2000;
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        let successfulEmails = 0;
+        let failedEmails = 0;
+        const totalEmails = results.length;
+        const successfulRecipients = [];
+
+        for (let i = 0; i < results.length; i++) {
+          const row = results[i];
+          // Normalize possible header names: prefer 'partner', fallback to 'schoolname' or 'name'
+          const name = (row.name || row.partner || row.schoolname || "").trim();
+          const recipientEmail = (row.email || row.Email || "").trim();
+
+          // Skip rows without a valid-looking email (also skips header-row if it was parsed as data)
+          if (
+            !recipientEmail ||
+            recipientEmail.toLowerCase() === "email" ||
+            recipientEmail.indexOf("@") === -1
+          ) {
+            console.warn("Skipping invalid recipient row:", row);
+            failedEmails++;
+            if (i < results.length - 1) await sleep(emailDelayMs);
+            continue;
+          }
+
+          const mailOptions = {
+            from: `"Mtoto W'Afrika Child Care Ministries" <${process.env.EMAIL_USER}>`,
+            to: recipientEmail,
+            subject: subject,
+          };
+
+          // Support multiple placeholder styles: [Name], [School Name], [Partner], {{name}}, {{Name}}, [[Name]]
+          let personalizedMessage = message || "";
+          const placeholderValue = name || recipientEmail;
+
+          // Common bracketed placeholders
+          personalizedMessage = personalizedMessage
+            .replace(/\[Name\]/gi, placeholderValue)
+            .replace(/\[Partner\]/gi, placeholderValue)
+            .replace(/\[name\]/gi, placeholderValue);
+
+          // Mustache-style {{name}} or {{Name}}
+          personalizedMessage = personalizedMessage.replace(
+            /{{\s*name\s*}}/gi,
+            placeholderValue,
+          );
+
+          // Double-bracket style [[Name]]
+          personalizedMessage = personalizedMessage.replace(
+            /\[\[\s*name\s*\]\]/gi,
+            placeholderValue,
+          );
+
+          if (emailType === "html") {
+            mailOptions.html = personalizedMessage;
+          } else {
+            mailOptions.text = personalizedMessage;
+          }
+
+          // If an attachment was uploaded, attach it to each outgoing email
+          if (attachmentFile) {
+            mailOptions.attachments = [
+              {
+                filename: attachmentFile.originalname,
+                path: attachmentFile.path,
+              },
+            ];
+          }
+
+          try {
+            await transporter.sendMail(mailOptions);
+            successfulEmails++;
+            successfulRecipients.push({
+              name: name,
+              email: recipientEmail,
+            });
+          } catch (error) {
+            console.error(`Failed to send email to ${recipientEmail}:`, error);
+            failedEmails++;
+          }
+
+          if (i < results.length - 1) await sleep(emailDelayMs);
+        }
+
+        if (typeof transporter.close === "function") {
+          transporter.close();
+        }
+
+        // Write successful recipients to CSV
+        const csvWriter = createCsvWriter({
+          path: path.join(__dirname, "../uploads/last_report.csv"),
+          header: [
+            { id: "name", title: "Name" },
+            { id: "email", title: "Email" },
+          ],
+        });
+
+        await csvWriter.writeRecords(successfulRecipients);
+
+        // Send analytics report
+        await sendAnalyticsReport(
+          {
+            total: totalEmails,
+            successful: successfulEmails,
+            failed: failedEmails,
+          },
+          message,
+          emailType,
+          subject,
+          successfulRecipients,
+        );
+
+        // Clean up uploaded files
+        try {
+          if (csvFile && fs.existsSync(csvFile.path))
+            fs.unlinkSync(csvFile.path);
+          if (attachmentFile && fs.existsSync(attachmentFile.path))
+            fs.unlinkSync(attachmentFile.path);
+        } catch (err) {
+          console.error("Error cleaning up uploaded files:", err);
+        }
+        res.redirect("/dashboard?status=success");
+      });
+  });
+});
+
+router.get("/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.redirect("/dashboard");
+    }
+    res.clearCookie("connect.sid");
+    res.redirect("/");
+  });
+});
+
+router.get("/download-csv", (req, res) => {
+  const filePath = path.join(__dirname, "../uploads/last_report.csv");
+  res.download(filePath, "campaign_report.csv", (err) => {
+    if (err) {
+      console.error("Error downloading file:", err);
+      res.status(500).send("Could not download the file.");
+    }
+  });
+});
+
+module.exports = router;
